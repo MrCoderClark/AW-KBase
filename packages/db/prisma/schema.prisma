@@ -1,0 +1,382 @@
+// Knowledge Base — Prisma schema
+// See docs/database-schema.md for design rationale.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Prisma 7: connection URL + extensions live in ../prisma.config.ts
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================================================
+// ENUMS
+// =========================================================
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum ArticleStatus {
+  DRAFT
+  IN_REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ArticleVisibility {
+  INTERNAL
+  RESTRICTED
+  PUBLIC
+}
+
+enum CommentStatus {
+  ACTIVE
+  EDITED
+  HIDDEN
+  DELETED
+}
+
+enum FeedbackVote {
+  HELPFUL
+  NOT_HELPFUL
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  PUBLISH
+  UNPUBLISH
+  ARCHIVE
+  RESTORE
+  LOGIN
+  LOGOUT
+  PERMISSION_CHANGE
+  EXPORT
+}
+
+// =========================================================
+// IDENTITY & ACCESS
+// =========================================================
+
+model User {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String     @unique @db.Citext
+  emailVerifiedAt DateTime?
+  name            String
+  avatarUrl       String?
+  passwordHash    String?
+  ssoSubject      String?    @unique
+  status          UserStatus @default(INVITED)
+  permVer         Int        @default(1)
+  lastLoginAt     DateTime?
+
+  roles            UserRole[]
+  authoredArticles Article[]        @relation("ArticleAuthor")
+  versions         ArticleVersion[] @relation("VersionEditor")
+  comments         Comment[]
+  feedback         Feedback[]
+  auditLogs        AuditLog[]       @relation("AuditActor")
+  attachments      Attachment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([status])
+  @@index([deletedAt])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Role {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String @unique
+  name        String
+  description String?
+  isSystem    Boolean @default(false)
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String @unique
+  description String?
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String @db.Uuid
+  roleId String @db.Uuid
+
+  user Role @relation(fields: [roleId], references: [id], onDelete: Cascade, map: "user_roles_role_fk")
+  u    User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "user_roles_user_fk")
+
+  assignedAt DateTime @default(now())
+  assignedBy String?  @db.Uuid
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+// =========================================================
+// TAXONOMY
+// =========================================================
+
+model Category {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  parentId    String? @db.Uuid
+  slug        String  @unique
+  name        String
+  description String?
+  icon        String?
+  path        String  @default("/")
+  depth       Int     @default(0)
+  sortOrder   Int     @default(0)
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+  articles Article[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([parentId])
+  @@index([path])
+  @@index([deletedAt])
+  @@map("categories")
+}
+
+model Tag {
+  id    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug  String  @unique
+  name  String  @unique
+  color String?
+
+  articles ArticleTag[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tags")
+}
+
+// =========================================================
+// ARTICLES
+// =========================================================
+
+model Article {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug             String            @unique
+  title            String
+  summary          String?           @db.VarChar(500)
+  status           ArticleStatus     @default(DRAFT)
+  visibility       ArticleVisibility @default(INTERNAL)
+  locale           String            @default("en")
+
+  categoryId       String? @db.Uuid
+  authorId         String  @db.Uuid
+  currentVersionId String? @unique @db.Uuid
+
+  publishedAt     DateTime?
+  archivedAt      DateTime?
+  viewCount       Int       @default(0)
+  helpfulCount    Int       @default(0)
+  notHelpfulCount Int       @default(0)
+
+  searchVector Unsupported("tsvector")?
+
+  category       Category?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  author         User             @relation("ArticleAuthor", fields: [authorId], references: [id])
+  currentVersion ArticleVersion?  @relation("CurrentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions       ArticleVersion[] @relation("ArticleVersions")
+  tags           ArticleTag[]
+  comments       Comment[]
+  feedback       Feedback[]
+  attachments    Attachment[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([status, visibility, publishedAt(sort: Desc)])
+  @@index([categoryId, status])
+  @@index([authorId])
+  @@index([deletedAt])
+  @@index([updatedAt])
+  @@index([searchVector], type: Gin)
+  @@map("articles")
+}
+
+model ArticleVersion {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  articleId   String  @db.Uuid
+  versionNo   Int
+  title       String
+  summary     String? @db.VarChar(500)
+  contentMd   String
+  contentHtml String
+  changeNote  String?
+  editorId    String  @db.Uuid
+  isMajor     Boolean @default(false)
+
+  article   Article  @relation("ArticleVersions", fields: [articleId], references: [id], onDelete: Cascade)
+  editor    User     @relation("VersionEditor", fields: [editorId], references: [id])
+  currentOf Article? @relation("CurrentVersion")
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, versionNo])
+  @@index([articleId, createdAt(sort: Desc)])
+  @@index([editorId])
+  @@map("article_versions")
+}
+
+model ArticleTag {
+  articleId String @db.Uuid
+  tagId     String @db.Uuid
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  assignedAt DateTime @default(now())
+
+  @@id([articleId, tagId])
+  @@index([tagId])
+  @@map("article_tags")
+}
+
+// =========================================================
+// ENGAGEMENT
+// =========================================================
+
+model Comment {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  articleId String        @db.Uuid
+  authorId  String        @db.Uuid
+  parentId  String?       @db.Uuid
+  body      String
+  status    CommentStatus @default(ACTIVE)
+  editedAt  DateTime?
+
+  article Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  author  User      @relation(fields: [authorId], references: [id])
+  parent  Comment?  @relation("CommentThread", fields: [parentId], references: [id], onDelete: SetNull)
+  replies Comment[] @relation("CommentThread")
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([articleId, createdAt(sort: Desc)])
+  @@index([parentId])
+  @@index([authorId])
+  @@index([deletedAt])
+  @@map("comments")
+}
+
+model Feedback {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  articleId String       @db.Uuid
+  userId    String?      @db.Uuid
+  vote      FeedbackVote
+  comment   String?      @db.VarChar(1000)
+  anonHash  String?
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([articleId, userId])
+  @@unique([articleId, anonHash])
+  @@index([articleId, vote])
+  @@index([createdAt])
+  @@map("feedback")
+}
+
+// =========================================================
+// ATTACHMENTS
+// =========================================================
+
+model Attachment {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  articleId   String? @db.Uuid
+  uploaderId  String  @db.Uuid
+  storageKey  String  @unique
+  filename    String
+  contentType String
+  byteSize    BigInt
+  checksumSha String?
+  width       Int?
+  height      Int?
+
+  article  Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  uploader User     @relation(fields: [uploaderId], references: [id])
+
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+
+  @@index([articleId])
+  @@index([uploaderId])
+  @@index([deletedAt])
+  @@map("attachments")
+}
+
+// =========================================================
+// AUDIT
+// =========================================================
+
+model AuditLog {
+  id            BigInt      @id @default(autoincrement())
+  actorId       String?     @db.Uuid
+  action        AuditAction
+  entityType    String
+  entityId      String?     @db.Uuid
+  metadata      Json        @default("{}")
+  ipAddress     String?     @db.Inet
+  userAgent     String?
+  correlationId String?
+  createdAt     DateTime    @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

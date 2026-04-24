@@ -2,25 +2,30 @@
   "name": "aw-kbase",
   "version": "0.1.0",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=20.10"
   },
-  "dependencies": {
-    "next": "16.2.4",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "dev:web": "pnpm --filter @kb/web dev",
+    "dev:api": "pnpm --filter @kb/api dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "db:generate": "pnpm --filter @kb/db db:generate",
+    "db:migrate": "pnpm --filter @kb/db db:migrate",
+    "db:seed": "pnpm --filter @kb/db db:seed",
+    "db:bootstrap": "pnpm --filter @kb/db db:bootstrap",
+    "db:studio": "pnpm --filter @kb/db db:studio",
+    "clean": "turbo run clean && rimraf node_modules"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.4",
-    "tailwindcss": "^4",
+    "@types/dompurify": "^3.2.0",
+    "prettier": "^3.8.3",
+    "rimraf": "^6.0.1",
+    "turbo": "^2.3.3",
     "typescript": "^5"
   }
 }
