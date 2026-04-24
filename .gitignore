@@ -52,3 +52,6 @@ next-env.d.ts
 # local runtime — meilisearch binary + data (see scripts/meilisearch.ps1)
 /.bin
 /.data
+
+# git worktrees
+.worktrees
