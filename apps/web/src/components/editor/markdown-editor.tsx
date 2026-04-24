@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { AiToolbar } from "@/components/editor/ai-toolbar";
 
 type Mode = "edit" | "split" | "preview";
 
@@ -212,6 +213,9 @@ export function MarkdownEditor({
         >
           <ImageIcon className="size-3.5" />
         </ToolbarButton>
+
+        <Divider />
+        <AiToolbar value={value} onChange={onChange} />
 
         {/* Mode switcher pushed to the right */}
         <div className="ml-auto flex items-center gap-0.5 border border-border p-0.5">
