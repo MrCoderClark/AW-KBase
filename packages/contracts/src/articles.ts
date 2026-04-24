@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PageInfoSchema, SlugSchema } from "./common";
+import { PageInfoSchema, SlugSchema } from "./common.js";
 
 export const ArticleStatus = z.enum([
   "DRAFT",
