@@ -32,6 +32,11 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { AiToolbar } from "@/components/editor/ai-toolbar";
+import { toast } from "sonner";
+import {
+  ImageEditorDialog,
+  type ImageEditorState,
+} from "@/components/editor/image-editor-dialog";
 
 type Mode = "edit" | "split" | "preview";
 
@@ -60,6 +65,12 @@ export function MarkdownEditor({
   const isDark = resolvedTheme === "dark";
   const [mode, setMode] = useState<Mode>("split");
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [editorDialog, setEditorDialog] = useState<{
+    open: boolean;
+    initialState: ImageEditorState;
+  } | null>(null);
 
   const extensions = useMemo(
     () => [
@@ -112,6 +123,81 @@ export function MarkdownEditor({
     if (!view) return;
     fn(view);
     view.focus();
+  }, []);
+
+  const handleImageFileSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+
+      setUploading(true);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/images/upload", {
+          method: "POST",
+          body: form,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `Upload failed (${res.status})`);
+        }
+        const { filename } = (await res.json()) as { filename: string };
+
+        const img = new window.Image();
+        img.src = `/api/images/${filename}`;
+        await Promise.race([
+          new Promise<void>((resolve) => {
+            img.onload = () => resolve();
+            img.onerror = () => {
+              toast.error("Image uploaded but preview failed to load.");
+              resolve();
+            };
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]);
+
+        const displayWidth = Math.min(img.naturalWidth || 600, 600);
+        setEditorDialog({
+          open: true,
+          initialState: {
+            filename,
+            originalWidth: img.naturalWidth,
+            originalHeight: img.naturalHeight,
+            width: displayWidth,
+            height: img.naturalHeight
+              ? Math.round(
+                  (img.naturalHeight / (img.naturalWidth || 1)) *
+                    displayWidth,
+                )
+              : 400,
+            alt: "",
+          },
+        });
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Image upload failed",
+        );
+      } finally {
+        setUploading(false);
+      }
+    },
+    [],
+  );
+
+  const handleImageConfirm = useCallback(
+    (state: ImageEditorState) => {
+      setEditorDialog(null);
+      const escapedAlt = state.alt.replace(/"/g, "&quot;");
+      const tag = `<img src="/api/images/${state.filename}" width="${state.width}" alt="${escapedAlt}" />`;
+      action((v) => replaceSelection(v, tag));
+    },
+    [action],
+  );
+
+  const handleImageCancel = useCallback(() => {
+    setEditorDialog(null);
   }, []);
 
   return (
@@ -206,13 +292,23 @@ export function MarkdownEditor({
           <Link2 className="size-3.5" />
         </ToolbarButton>
         <ToolbarButton
-          label="Image"
-          onClick={() =>
-            action((v) => replaceSelection(v, "![alt text](https://)"))
-          }
+          label="Upload image"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
         >
-          <ImageIcon className="size-3.5" />
+          {uploading ? (
+            <span className="size-3.5 animate-spin rounded-full border border-current border-t-transparent" />
+          ) : (
+            <ImageIcon className="size-3.5" />
+          )}
         </ToolbarButton>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          className="hidden"
+          onChange={handleImageFileSelected}
+        />
 
         <Divider />
         <AiToolbar value={value} onChange={onChange} />
@@ -295,6 +391,14 @@ export function MarkdownEditor({
           </div>
         )}
       </div>
+      {editorDialog && (
+        <ImageEditorDialog
+          open={editorDialog.open}
+          initialState={editorDialog.initialState}
+          onConfirm={handleImageConfirm}
+          onCancel={handleImageCancel}
+        />
+      )}
     </div>
   );
 }
@@ -304,11 +408,13 @@ function ToolbarButton({
   label,
   kbd,
   onClick,
+  disabled,
 }: {
   children: React.ReactNode;
   label: string;
   kbd?: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <Button
@@ -318,6 +424,7 @@ function ToolbarButton({
       title={kbd ? `${label} · ${kbd}` : label}
       aria-label={label}
       onClick={onClick}
+      disabled={disabled}
       className="size-7"
     >
       {children}
